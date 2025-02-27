@@ -1,0 +1,28 @@
+{
+  "name": "stackrank",
+  "version": "1.0.0",
+  "description": "A CLI tool to stack rank ideas using merge sort and user preferences",
+  "main": "dist/rank.js",
+  "bin": {
+    "stackrank": "dist/rank.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/rank.js",
+    "dev": "tsc && node dist/rank.js",
+    "clean": "rm -rf dist",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ranking",
+    "cli",
+    "ideas",
+    "merge-sort"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3"
+  }
+}
