@@ -2,12 +2,32 @@
 "use strict";
 
 import * as readline from "readline";
+import * as fs from "fs";
+import * as path from "path";
 import { KeypressEvent } from "./types";
 
 // Enable keypress event handling
 readline.emitKeypressEvents(process.stdin);
 if (process.stdin.isTTY) {
   process.stdin.setRawMode(true);
+}
+
+// Function to read ideas from a JSON file
+function readIdeasFromFile(filePath: string): string[] {
+  try {
+    const absolutePath = path.resolve(filePath);
+    const fileContent = fs.readFileSync(absolutePath, "utf8");
+    const data = JSON.parse(fileContent);
+
+    if (!Array.isArray(data.ideas)) {
+      throw new Error("JSON file must contain an 'ideas' array");
+    }
+
+    return data.ideas;
+  } catch (error) {
+    console.error(`Error reading ideas file: ${error.message}`);
+    process.exit(1);
+  }
 }
 
 // Helper function to capture a single keypress
@@ -73,37 +93,23 @@ async function merge(left: string[], right: string[]): Promise<string[]> {
 
 // **Main function**
 (async () => {
-  let myIdeas: string[] = [
-    "Scraping tool with AI to rebuild website UIs for demo environments",
-    "Developer platform alternative to GitHub with an AI plugin ecosystem",
-    "AI-powered plugin for open source documentation platforms",
-    "Pricing and margins automation and observability tool",
-    "Plug-and-play SaaS alerting and log delivery system with webhook integration",
-    "Aggregated, anonymous software review platform replacing G2/Siftery",
-    "Doctor virtual assistant for answering patient questions",
-    "Insurance claims platform for at-home caregivers",
-    "Nursing home management software",
-    "AI agent platform that connects and monetizes small AI agents",
-    "Travel itinerary planning and sharing tool (with spreadsheet-like interface)",
-    "Travel maps with social recommendations",
-    "Booking software platform for service businesses (like a Shopify for bookings)",
-    "Tool for building Duolingo-style learning apps with GPT integration",
-    "Peer mentoring platform for professionals (including teacher-for-teacher models)",
-    "Product wishlist sharing platform",
-    "Price tracking tool for product pages with URL input and offer code integration",
-    "SEO tool for AI chatbots",
-    "Distributed proxy network with crypto payouts",
-    "Contract analysis tool to extract agreements and SLAs",
-  ];
+  // Default file path
+  const defaultFilePath = path.join(__dirname, "../ideas.json");
+
+  // Use command line argument for file path if provided, otherwise use default
+  const filePath = process.argv[2] || defaultFilePath;
+
+  console.log(`Reading ideas from: ${filePath}`);
+  const myIdeas = readIdeasFromFile(filePath);
 
   console.log(
     "\nWelcome! Let's rank your ideas...\n(Press 'q' anytime to quit)"
   );
 
-  myIdeas = await mergeSort(myIdeas);
+  const rankedIdeas = await mergeSort(myIdeas);
 
   console.log("\nYour final stack ranking:");
-  myIdeas.forEach((idea, i) => {
+  rankedIdeas.forEach((idea, i) => {
     console.log(`${i + 1}. ${idea}`);
   });
 
