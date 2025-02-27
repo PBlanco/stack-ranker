@@ -46,7 +46,8 @@ async function compareIdeas(
   console.log(`\nWhich do you prefer?`);
   console.log(`(1) ${a.text}`);
   console.log(`(2) ${b.text}`);
-  console.log(`Press '1' or '2' (or 'q' to quit)...`);
+  console.log(`(3) Equal`);
+  console.log(`Press '1', '2', or '3' (or 'q' to quit)...`);
 
   while (true) {
     const key = await getSingleKey();
@@ -100,7 +101,46 @@ async function compareIdeas(
       saveIdeasDatabase(database, filePath);
       return;
     }
-    console.log("Please press '1' or '2' (or 'q' to quit)...");
+    if (key === "3") {
+      // When tied, adjust ELO based on number of previous comparisons
+      const oldAElo = a.elo;
+      const oldBElo = b.elo;
+      const averageElo = Math.round((a.elo + b.elo) / 2);
+
+      // Base adjustment factor
+      const baseAdjustmentFactor = 0.4;
+
+      // Calculate confidence factors based on number of comparisons
+      // More comparisons = less movement (higher confidence in current rating)
+      const aConfidenceFactor =
+        1 / (1 + Math.log(1 + a.comparisons.length * 0.1));
+      const bConfidenceFactor =
+        1 / (1 + Math.log(1 + b.comparisons.length * 0.1));
+
+      // Calculate adjusted ELO scores
+      const aAdjustment = Math.round(
+        (averageElo - a.elo) * baseAdjustmentFactor * aConfidenceFactor
+      );
+      const bAdjustment = Math.round(
+        (averageElo - b.elo) * baseAdjustmentFactor * bConfidenceFactor
+      );
+
+      a.elo = a.elo + aAdjustment;
+      b.elo = b.elo + bAdjustment;
+
+      console.log(`\nYou considered these equal.`);
+      console.log(
+        `${a.text} (${a.comparisons.length} previous comparisons) moved from ${oldAElo} to ${a.elo} ELO`
+      );
+      console.log(
+        `${b.text} (${b.comparisons.length} previous comparisons) moved from ${oldBElo} to ${b.elo} ELO`
+      );
+
+      // Save after each comparison
+      database.lastUpdated = new Date().toISOString();
+      saveIdeasDatabase(database, filePath);
+      return;
+    }
   }
 }
 
