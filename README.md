@@ -19,18 +19,14 @@ npm install
 # Build the project
 npm run build
 
-# Link the package globally (optional)
-npm link
 ```
 
 ## Usage
+Make an `ideas.json` file with a list of things to stack rank.
 
 ```bash
 # Run directly
 npm start
-
-# Or if linked globally
-stackrank
 ```
 
 ## How It Works
@@ -52,4 +48,4 @@ npm run clean
 
 ## License
 
-ISC 
+MIT
