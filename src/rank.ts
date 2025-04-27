@@ -4,30 +4,21 @@
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
-import { KeypressEvent } from "./types";
+import { KeypressEvent, Idea, IdeasDatabase } from "./types";
+import {
+  readIdeasDatabase,
+  saveIdeasDatabase,
+  addIdea,
+  updateElo,
+  getRankings,
+  selectIdeasForComparison,
+  normalizeScores,
+} from "./elo";
 
 // Enable keypress event handling
 readline.emitKeypressEvents(process.stdin);
 if (process.stdin.isTTY) {
   process.stdin.setRawMode(true);
-}
-
-// Function to read ideas from a JSON file
-function readIdeasFromFile(filePath: string): string[] {
-  try {
-    const absolutePath = path.resolve(filePath);
-    const fileContent = fs.readFileSync(absolutePath, "utf8");
-    const data = JSON.parse(fileContent);
-
-    if (!Array.isArray(data.ideas)) {
-      throw new Error("JSON file must contain an 'ideas' array");
-    }
-
-    return data.ideas;
-  } catch (error) {
-    console.error(`Error reading ideas file: ${error.message}`);
-    process.exit(1);
-  }
 }
 
 // Helper function to capture a single keypress
@@ -45,50 +36,192 @@ function getSingleKey(): Promise<string> {
   });
 }
 
-// Function to compare two ideas
-async function getPreference(a: string, b: string): Promise<string> {
+// Function to compare two ideas using ELO
+async function compareIdeas(
+  a: Idea,
+  b: Idea,
+  database: IdeasDatabase,
+  filePath: string
+): Promise<void> {
   console.log(`\nWhich do you prefer?`);
-  console.log(`(1) ${a}`);
-  console.log(`(2) ${b}`);
-  console.log(`Press '1' or '2' (or 'q' to quit)...`);
+  console.log(`(1) ${a.text}`);
+  console.log(`(2) ${b.text}`);
+  console.log(`(3) Equal`);
+  console.log(`Press '1', '2', or '3' (or 'q' to quit)...`);
 
   while (true) {
     const key = await getSingleKey();
-    if (key === "1") return a;
-    if (key === "2") return b;
-    console.log("Please press '1' or '2' (or 'q' to quit)...");
-  }
-}
+    if (key === "1") {
+      const { winnerChange, loserChange } = updateElo(a, b);
 
-// **Merge Sort with User Input**
-async function mergeSort(ideas: string[]): Promise<string[]> {
-  if (ideas.length <= 1) return ideas; // Base case
+      // Get normalized scores for these two ideas
+      const normalized = normalizeScores([a, b]);
+      const normalizedA =
+        normalized.find((item) => item.idea.id === a.id)?.normalizedScore || 0;
+      const normalizedB =
+        normalized.find((item) => item.idea.id === b.id)?.normalizedScore || 0;
 
-  const mid = Math.floor(ideas.length / 2);
-  const left = await mergeSort(ideas.slice(0, mid));
-  const right = await mergeSort(ideas.slice(mid));
+      console.log(`\nYou preferred: ${a.text}`);
+      console.log(
+        `${a.text} gained ${winnerChange} ELO points (now ${a.elo}, normalized: ${normalizedA}/10)`
+      );
+      console.log(
+        `${b.text} lost ${Math.abs(loserChange)} ELO points (now ${
+          b.elo
+        }, normalized: ${normalizedB}/10)`
+      );
 
-  return await merge(left, right);
-}
+      // Save after each comparison
+      database.lastUpdated = new Date().toISOString();
+      saveIdeasDatabase(database, filePath);
+      return;
+    }
+    if (key === "2") {
+      const { winnerChange, loserChange } = updateElo(b, a);
 
-// **Merge function that sorts using user preferences**
-async function merge(left: string[], right: string[]): Promise<string[]> {
-  const sorted: string[] = [];
-  while (left.length && right.length) {
-    const preferred = await getPreference(left[0], right[0]);
-    if (preferred === left[0]) {
-      const item = left.shift();
-      if (item !== undefined) {
-        sorted.push(item);
-      }
-    } else {
-      const item = right.shift();
-      if (item !== undefined) {
-        sorted.push(item);
-      }
+      // Get normalized scores for these two ideas
+      const normalized = normalizeScores([a, b]);
+      const normalizedA =
+        normalized.find((item) => item.idea.id === a.id)?.normalizedScore || 0;
+      const normalizedB =
+        normalized.find((item) => item.idea.id === b.id)?.normalizedScore || 0;
+
+      console.log(`\nYou preferred: ${b.text}`);
+      console.log(
+        `${b.text} gained ${winnerChange} ELO points (now ${b.elo}, normalized: ${normalizedB}/10)`
+      );
+      console.log(
+        `${a.text} lost ${Math.abs(loserChange)} ELO points (now ${
+          a.elo
+        }, normalized: ${normalizedA}/10)`
+      );
+
+      // Save after each comparison
+      database.lastUpdated = new Date().toISOString();
+      saveIdeasDatabase(database, filePath);
+      return;
+    }
+    if (key === "3") {
+      // When tied, adjust ELO based on number of previous comparisons
+      const oldAElo = a.elo;
+      const oldBElo = b.elo;
+      const averageElo = Math.round((a.elo + b.elo) / 2);
+
+      // Base adjustment factor
+      const baseAdjustmentFactor = 0.4;
+
+      // Calculate confidence factors based on number of comparisons
+      // More comparisons = less movement (higher confidence in current rating)
+      const aConfidenceFactor =
+        1 / (1 + Math.log(1 + a.comparisons.length * 0.1));
+      const bConfidenceFactor =
+        1 / (1 + Math.log(1 + b.comparisons.length * 0.1));
+
+      // Calculate adjusted ELO scores
+      const aAdjustment = Math.round(
+        (averageElo - a.elo) * baseAdjustmentFactor * aConfidenceFactor
+      );
+      const bAdjustment = Math.round(
+        (averageElo - b.elo) * baseAdjustmentFactor * bConfidenceFactor
+      );
+
+      a.elo = a.elo + aAdjustment;
+      b.elo = b.elo + bAdjustment;
+
+      console.log(`\nYou considered these equal.`);
+      console.log(
+        `${a.text} (${a.comparisons.length} previous comparisons) moved from ${oldAElo} to ${a.elo} ELO`
+      );
+      console.log(
+        `${b.text} (${b.comparisons.length} previous comparisons) moved from ${oldBElo} to ${b.elo} ELO`
+      );
+
+      // Save after each comparison
+      database.lastUpdated = new Date().toISOString();
+      saveIdeasDatabase(database, filePath);
+      return;
     }
   }
-  return [...sorted, ...left, ...right]; // Append remaining elements
+}
+
+// Function to add a new idea
+async function promptForNewIdea(
+  database: IdeasDatabase,
+  filePath: string
+): Promise<void> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question("\nEnter a new idea (or press Enter to cancel): ", (text) => {
+      rl.close();
+
+      if (text.trim() === "") {
+        console.log("Cancelled adding new idea.");
+        resolve();
+        return;
+      }
+
+      const idea = addIdea(database, text);
+      console.log(
+        `Added new idea: "${text}" with ID ${idea.id} and initial ELO ${idea.elo}`
+      );
+
+      // Save after adding
+      database.lastUpdated = new Date().toISOString();
+      saveIdeasDatabase(database, filePath);
+      resolve();
+    });
+  });
+}
+
+// Function to display the menu
+async function displayMenu(): Promise<string> {
+  console.log("\n=== ELO Idea Ranking System ===");
+  console.log("1. Compare two ideas");
+  console.log("2. View rankings");
+  console.log("3. Add new idea");
+  console.log("q. Quit");
+  console.log("\nSelect an option (1-3 or q):");
+
+  while (true) {
+    const key = await getSingleKey();
+    if (["1", "2", "3", "q"].includes(key)) {
+      return key;
+    }
+    console.log("Please select a valid option (1-3 or q):");
+  }
+}
+
+// Function to display rankings
+function displayRankings(database: IdeasDatabase): void {
+  const rankings = getRankings(database);
+
+  console.log("\n=== Current Idea Rankings ===");
+  if (rankings.length === 0) {
+    console.log("No ideas in the database yet.");
+    return;
+  }
+
+  // Get normalized scores (0-10 scale)
+  const normalizedRankings = normalizeScores(rankings);
+
+  console.log("Rank | ELO  | Score (0-10) | Comparisons | Idea");
+  console.log("-----|------|--------------|-------------|------------------");
+
+  normalizedRankings.forEach(({ idea, normalizedScore }, index) => {
+    console.log(
+      `${(index + 1).toString().padEnd(4)} | ${idea.elo
+        .toString()
+        .padEnd(4)} | ${normalizedScore
+        .toString()
+        .padEnd(12)} | ${idea.comparisons.length.toString().padEnd(11)} | ${
+        idea.text
+      }`
+    );
+  });
 }
 
 // **Main function**
@@ -99,22 +232,47 @@ async function merge(left: string[], right: string[]): Promise<string[]> {
   // Use command line argument for file path if provided, otherwise use default
   const filePath = process.argv[2] || defaultFilePath;
 
-  console.log(`Reading ideas from: ${filePath}`);
-  const myIdeas = readIdeasFromFile(filePath);
+  console.log(`Reading ideas database from: ${filePath}`);
+  let database = readIdeasDatabase(filePath);
 
   console.log(
-    "\nWelcome! Let's rank your ideas...\n(Press 'q' anytime to quit)"
+    "\nWelcome to the ELO Idea Ranking System!\n(Press 'q' anytime to quit)"
   );
 
-  const rankedIdeas = await mergeSort(myIdeas);
+  while (true) {
+    const choice = await displayMenu();
 
-  console.log("\nYour final stack ranking:");
-  rankedIdeas.forEach((idea, i) => {
-    console.log(`${i + 1}. ${idea}`);
-  });
+    switch (choice) {
+      case "1": // Compare ideas
+        if (database.ideas.length < 2) {
+          console.log(
+            "\nYou need at least 2 ideas to make a comparison. Please add more ideas."
+          );
+          break;
+        }
 
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(false);
+        try {
+          const [ideaA, ideaB] = selectIdeasForComparison(database);
+          await compareIdeas(ideaA, ideaB, database, filePath);
+        } catch (error: any) {
+          console.error(`Error during comparison: ${error.message}`);
+        }
+        break;
+
+      case "2": // View rankings
+        displayRankings(database);
+        break;
+
+      case "3": // Add new idea
+        await promptForNewIdea(database, filePath);
+        break;
+
+      case "q": // Quit
+        console.log("\nExiting...\n");
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(false);
+        }
+        process.exit(0);
+    }
   }
-  process.exit(0);
 })();
